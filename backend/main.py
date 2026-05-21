@@ -1080,8 +1080,18 @@ def _public_mesh_log_size(entries: list[dict[str, Any]]) -> int:
     return sum(1 for item in entries if _public_mesh_log_entry(item) is not None)
 
 
-_WORMHOLE_PUBLIC_SETTINGS_FIELDS = {"enabled", "transport", "anonymous_mode"}
-_WORMHOLE_PUBLIC_PROFILE_FIELDS = {"profile", "wormhole_enabled"}
+# Issue #243 (tg12): the public redaction now exposes only the bare
+# "is Wormhole on?" boolean. Transport choice (tor/i2p/mixnet/direct),
+# anonymous-mode state, and the named privacy profile are all
+# operational posture and were leaking actionable recon to any
+# unauthenticated caller. They are now gated behind authenticated reads
+# (admin key or scoped-view token). Loopback Tauri shells and Docker
+# bridge frontend containers continue to see full status because the
+# Next.js catch-all proxy injects the configured ADMIN_KEY for
+# same-origin/non-browser callers (see PR #263), so legitimate operator
+# UX is unaffected.
+_WORMHOLE_PUBLIC_SETTINGS_FIELDS = {"enabled"}
+_WORMHOLE_PUBLIC_PROFILE_FIELDS = {"wormhole_enabled"}
 _PRIVATE_LANE_CONTROL_FIELDS = {"private_lane_tier", "private_lane_policy"}
 _PUBLIC_RNS_STATUS_FIELDS = {"enabled", "ready", "configured_peers", "active_peers"}
 _NODE_PUBLIC_EVENT_HOOK_REGISTERED = False
@@ -8810,9 +8820,14 @@ async def api_uw_flow(request: Request):
 from services.news_feed_config import get_feeds, save_feeds, reset_feeds
 
 
-@app.get("/api/settings/news-feeds")
+@app.get(
+    "/api/settings/news-feeds",
+    dependencies=[Depends(require_local_operator)],
+)
 @limiter.limit("30/minute")
 async def api_get_news_feeds(request: Request):
+    """Issue #252 (tg12): gated on local-operator. See the canonical
+    handler in backend/routers/admin.py for the full rationale."""
     return get_feeds()
 
 
@@ -9015,9 +9030,22 @@ class NodeSettingsUpdate(BaseModel):
 @app.get("/api/settings/node")
 @limiter.limit("30/minute")
 async def api_get_node_settings(request: Request):
+    """Issue #243 (tg12): node mode and participant state are
+    operational posture. Anonymous callers receive an empty stub —
+    enough for the UI to know the endpoint exists but nothing
+    fingerprintable. Authenticated callers see the full state.
+
+    Authenticated == local-operator (loopback / Docker bridge) OR an
+    admin / scoped-view token. The Tauri shell and Docker frontend
+    container both qualify via their existing transport (PR #263 +
+    PR #278), so legitimate operator UX is unchanged.
+    """
     from services.node_settings import read_node_settings
 
     data = await asyncio.to_thread(read_node_settings)
+    authenticated = _scoped_view_authenticated(request, "node")
+    if not authenticated:
+        return {}
     return {
         **data,
         "node_mode": _current_node_mode(),
