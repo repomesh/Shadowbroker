@@ -777,6 +777,19 @@ def start_scheduler():
         misfire_grace_time=60,
     )
 
+    # Flight observation pruning — drops icao24 → first_seen_at entries we
+    # haven't seen in an hour. Same cadence as AIS prune for symmetry; the
+    # per-tick scan is O(in-flight aircraft) so it's cheap.
+    from services.fetchers.flight_observations import prune as _prune_flight_observations
+    _scheduler.add_job(
+        lambda: _run_task_with_health(_prune_flight_observations, "prune_flight_observations"),
+        "interval",
+        minutes=5,
+        id="flight_observation_prune",
+        max_instances=1,
+        misfire_grace_time=60,
+    )
+
     # AISHub REST fallback — slow polling when the AISStream WebSocket
     # primary is offline. Configurable interval via
     # AISHUB_POLL_INTERVAL_MINUTES env (default 20 min). Operator must

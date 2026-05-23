@@ -17,6 +17,7 @@ from services.network_utils import fetch_with_curl
 from services.fetchers._store import latest_data, _data_lock, _mark_fresh
 from services.fetchers.plane_alert import enrich_with_plane_alert, enrich_with_tracked_names
 from services.fetchers.emissions import get_emissions_info
+from services.fetchers.flight_observations import record_observation as _record_flight_observation
 from services.fetchers.retry import with_retry
 from services.fetchers.route_database import lookup_route
 from services.fetchers.aircraft_database import lookup_aircraft_type
@@ -601,6 +602,22 @@ def _classify_and_publish(all_adsb_flights):
         if model:
             emi = get_emissions_info(model)
             if emi:
+                # Cumulative fuel/CO2: multiply the per-hour rate by how
+                # long we've been observing this airframe. Users want to
+                # see the *amount* burned, not just the rate. If we've
+                # never seen this hex before, observed_seconds is 0 and
+                # the cumulative values are 0 until the next refresh —
+                # the rate is still useful info on its own.
+                observed_seconds = _record_flight_observation(
+                    f.get("icao24") or ""
+                )
+                elapsed_h = observed_seconds / 3600.0
+                emi = {
+                    **emi,
+                    "observed_seconds": observed_seconds,
+                    "fuel_gallons_burned": round(emi["fuel_gph"] * elapsed_h, 1),
+                    "co2_kg_emitted": round(emi["co2_kg_per_hour"] * elapsed_h, 1),
+                }
                 f["emissions"] = emi
 
         callsign = f.get("callsign", "").strip().upper()

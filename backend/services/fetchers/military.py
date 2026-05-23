@@ -7,6 +7,7 @@ import requests
 from services.network_utils import fetch_with_curl
 from services.fetchers._store import latest_data, _data_lock, _mark_fresh
 from services.fetchers.emissions import get_emissions_info
+from services.fetchers.flight_observations import record_observation as _record_flight_observation
 from services.fetchers.plane_alert import enrich_with_plane_alert
 
 logger = logging.getLogger("services.data_fetcher")
@@ -300,6 +301,18 @@ def fetch_military_flights():
         if model:
             emissions = get_emissions_info(model)
             if emissions:
+                # Cumulative fuel/CO2 since first observation — mirrors
+                # the civilian path in flights._classify_and_publish.
+                observed_seconds = _record_flight_observation(
+                    mf.get("icao24") or ""
+                )
+                elapsed_h = observed_seconds / 3600.0
+                emissions = {
+                    **emissions,
+                    "observed_seconds": observed_seconds,
+                    "fuel_gallons_burned": round(emissions["fuel_gph"] * elapsed_h, 1),
+                    "co2_kg_emitted": round(emissions["co2_kg_per_hour"] * elapsed_h, 1),
+                }
                 mf["emissions"] = emissions
         if mf.get("alert_category"):
             mf["type"] = "tracked_flight"
