@@ -310,6 +310,7 @@ from auth import (
     _private_plane_access_denied_payload,
     _private_infonet_policy_snapshot,
     _private_plane_refusal_response,
+    _request_scope_path,
     _scoped_admin_tokens,
     _scoped_view_authenticated as _scoped_view_authenticated_auth,
     _security_headers,
@@ -2728,7 +2729,7 @@ async def json_decode_error_handler(_request: Request, _exc: JSONDecodeError):
 
 @app.exception_handler(StarletteHTTPException)
 async def private_plane_http_exception_handler(request: Request, exc: StarletteHTTPException):
-    if exc.status_code == 403 and _is_private_plane_access_path(request.url.path, request.method):
+    if exc.status_code == 403 and _is_private_plane_access_path(_request_scope_path(request), request.method):
         return await _private_plane_refusal_response(
             request,
             status_code=403,
@@ -2762,7 +2763,7 @@ async def mesh_security_headers(request: Request, call_next):
 @app.middleware("http")
 async def mesh_no_store_headers(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith("/api/mesh/"):
+    if _request_scope_path(request).startswith("/api/mesh/"):
         response.headers["Cache-Control"] = "no-store, max-age=0"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -3464,7 +3465,7 @@ def _refresh_lookup_handle_rotation_background(*, reason: str) -> dict[str, Any]
 
 @app.middleware("http")
 async def enforce_high_privacy_mesh(request: Request, call_next):
-    path = request.url.path
+    path = _request_scope_path(request)
     private_mesh_path = path.startswith("/api/mesh") and not _is_public_meshtastic_lane_path(
         path,
         request.method,
@@ -3624,7 +3625,7 @@ async def enforce_high_privacy_mesh(request: Request, call_next):
 @app.middleware("http")
 async def apply_no_store_to_sensitive_paths(request: Request, call_next):
     response = await call_next(request)
-    if _is_sensitive_no_store_path(request.url.path):
+    if _is_sensitive_no_store_path(_request_scope_path(request)):
         for key, value in _NO_STORE_HEADERS.items():
             response.headers[key] = value
     return response

@@ -113,8 +113,14 @@ def _scoped_admin_tokens() -> dict[str, list[str]]:
     return normalized
 
 
+def _request_scope_path(request: Request) -> str:
+    """Return the ASGI request-line path, not the Host-derived URL path."""
+    scope = getattr(request, "scope", {}) or {}
+    return str(scope.get("path") or "")
+
+
 def _required_scope_for_request(request: Request) -> str:
-    path = str(request.url.path or "")
+    path = _request_scope_path(request)
     if path.startswith("/api/wormhole/gate/"):
         return "gate"
     if path.startswith("/api/wormhole/dm/"):
@@ -443,7 +449,7 @@ async def _verify_openclaw_hmac(request: Request) -> bool:
 
     # Compute expected signature: HMAC-SHA256(secret, METHOD|path|ts|nonce|body_digest)
     method = str(request.method or "").upper()
-    path = str(request.url.path or "")
+    path = _request_scope_path(request)
     message = f"{method}|{path}|{ts_str}|{nonce}|{body_digest}"
     expected = hmac.new(
         secret.encode("utf-8"),
@@ -744,8 +750,7 @@ def _is_debug_test_request(request: Request) -> bool:
     if not _debug_mode_enabled():
         return False
     client_host = (request.client.host or "").lower() if request.client else ""
-    url_host = (request.url.hostname or "").lower() if request.url else ""
-    return client_host == "test" or url_host == "test"
+    return client_host == "test"
 
 
 # ---------------------------------------------------------------------------
@@ -1397,10 +1402,7 @@ def _peer_hmac_url_from_request(request: Request) -> str:
     header_url = normalize_peer_url(str(request.headers.get("x-peer-url", "") or ""))
     if header_url:
         return header_url
-    if not request.url:
-        return ""
-    base_url = f"{request.url.scheme}://{request.url.netloc}".rstrip("/")
-    return normalize_peer_url(base_url)
+    return ""
 
 
 def _verify_peer_push_hmac(request: Request, body_bytes: bytes) -> bool:
