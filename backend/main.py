@@ -2912,24 +2912,16 @@ def _request_appears_private_infonet_transport(request) -> bool:
     if not _infonet_private_transport_required() or request is None:
         return False
 
+    client = getattr(request, "client", None)
+    client_host = str(getattr(client, "host", "") or "")
+    if not (_is_loopback_host(client_host) or _is_onion_host(client_host)):
+        return False
+
     forwarded_hosts = _forwarded_for_hosts(request)
     if forwarded_hosts and any(not (_is_loopback_host(host) or _is_onion_host(host)) for host in forwarded_hosts):
         return False
 
-    client = getattr(request, "client", None)
-    client_host = str(getattr(client, "host", "") or "")
-    headers = getattr(request, "headers", {}) or {}
-    host_header = str(headers.get("host", "") or "")
-    url_host = str(getattr(getattr(request, "url", None), "hostname", "") or "")
-    return any(
-        (
-            _is_loopback_host(client_host),
-            _is_loopback_host(host_header),
-            _is_loopback_host(url_host),
-            _is_onion_host(host_header),
-            _is_onion_host(url_host),
-        )
-    )
+    return True
 
 
 def _infonet_sync_response_events(events: list[dict], request=None) -> list[dict]:
